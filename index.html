@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>멜로디 스케치</title>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <h1 class="brand">멜로디 스케치</h1>
+        <div class="topbar__actions">
+          <div class="tempo" title="빠르기 (1분에 4분음표 몇 개)">
+            <button type="button" class="icon-btn" id="bpm-down" aria-label="느리게">−</button>
+            <label class="tempo__value">
+              <input id="bpm" type="number" min="40" max="220" step="1" inputmode="numeric" />
+              <span>BPM</span>
+            </label>
+            <button type="button" class="icon-btn" id="bpm-up" aria-label="빠르게">+</button>
+          </div>
+          <button type="button" class="btn btn--ghost" id="midi">MIDI 저장</button>
+          <button type="button" class="btn btn--primary" id="play">
+            <span class="play-icon" aria-hidden="true"></span><span id="play-label">악보 연주</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="paper-wrap">
+        <div class="paper" id="paper">
+          <div class="score" id="score"></div>
+          <p class="empty-hint" id="empty-hint">음표 길이를 고르고 아래 건반을 눌러 첫 음을 넣어 보세요.</p>
+        </div>
+        <p class="status" id="status">피아노 소리를 불러오는 중…</p>
+      </main>
+
+      <section class="deck">
+        <div class="toolbar">
+          <div class="segmented" id="durations" role="radiogroup" aria-label="음표 길이"></div>
+          <button type="button" class="btn btn--tool" id="rest">
+            <span class="glyph" id="rest-glyph" aria-hidden="true"></span>쉼표<kbd>R</kbd>
+          </button>
+          <span class="toolbar__gap"></span>
+          <button type="button" class="btn btn--tool" id="undo">지우기<kbd>⌫</kbd></button>
+          <button type="button" class="btn btn--tool" id="clear">전체 지우기</button>
+        </div>
+
+        <div class="keyboard-row">
+          <button type="button" class="octave-btn" id="oct-down" aria-label="한 옥타브 아래로">
+            <span aria-hidden="true">‹</span><kbd>Z</kbd>
+          </button>
+          <div class="keyboard" id="keyboard"></div>
+          <button type="button" class="octave-btn" id="oct-up" aria-label="한 옥타브 위로">
+            <span aria-hidden="true">›</span><kbd>X</kbd>
+          </button>
+        </div>
+
+        <div class="deck__foot">
+          <label class="switch">
+            <input type="checkbox" id="record" checked />
+            <span class="switch__track" aria-hidden="true"></span>
+            누른 음을 악보에 적기
+          </label>
+          <span class="range" id="range"></span>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

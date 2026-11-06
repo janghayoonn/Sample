@@ -1,0 +1,20 @@
+{
+  "name": "melody-sketch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "피아노 건반으로 멜로디를 입력하면 악보를 만들고, 그 악보를 피아노로 연주해 주는 웹앱",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5180 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 5180"
+  },
+  "dependencies": {
+    "@tonejs/midi": "^2.0.28",
+    "tone": "^15.1.22",
+    "vexflow": "^5.0.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.6"
+  }
+}
