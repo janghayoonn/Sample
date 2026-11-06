@@ -17,9 +17,14 @@
 - 비밀번호를 잊었다면: 사이트를 끄고 `data/auth.json` 파일을 지운 뒤 다시 켜면 새로 정할 수 있습니다.
 - 인터넷에 올릴 때는 `ADMIN_PASSWORD` 설정값으로 비밀번호를 정합니다 (이 값이 있으면 위 방식보다 우선).
 
-## 인터넷 배포용 설정값
-- `ADMIN_PASSWORD` — 편집 비밀번호
-- `DATA_DIR` — 책과 이미지를 저장할 영구 저장 공간의 경로 (예: `/data`)
+## 인터넷(Vercel)에 올리기
+- GitHub 저장소를 Vercel에 연결하면 자동으로 올라갑니다. 이후 GitHub에 올릴 때마다 자동 반영됩니다.
+- Vercel 프로젝트의 Storage 메뉴에서 두 가지를 만들어 연결해야 합니다.
+  - **Blob** (이미지 보관, 접근 방식 Public)
+  - **Upstash Redis** (책 정보 보관, 무료 플랜)
+- 연결 후 Redeploy → 사이트 주소 뒤에 `/edit` 를 붙여 들어가 편집 비밀번호를 정하세요.
+- 선택 설정값: `ADMIN_PASSWORD`(편집 비밀번호를 설정값으로 정할 때)
+- 큰 이미지는 올리기 전에 브라우저에서 자동으로 약 4MB 이하로 줄여서 올립니다.
 
 ## 저장 위치
 - 책 정보: `data/db.json`
@@ -28,6 +33,8 @@
 
 ## 파일 구성
 - `server.js` — 데이터를 저장하고 화면을 보내주는 서버
+- `storage.js` — 저장 위치 (내 컴퓨터 / Vercel 저장소)
+- `api/index.js`, `vercel.json` — Vercel에서 실행하기 위한 설정
 - `public/index.html` — 열람 홈 (책 목록)
 - `public/book.html` — 책 열람 (펼쳐보기 + 축소판)
 - `private/login.html` — 편집 로그인 / 비밀번호 정하기

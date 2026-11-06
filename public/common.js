@@ -1,17 +1,24 @@
 // 여러 화면에서 함께 쓰는 도구들
 
+// 내지 규격: 세로형 A5(기본) / 정사각형 / 가로형 16:9
 export const PRESETS = [
-  { key: 'a4', label: 'A4 (210 × 297mm)', w: 210, h: 297 },
-  { key: 'a5', label: 'A5 (148 × 210mm)', w: 148, h: 210 },
-  { key: 'b5', label: 'B5 (182 × 257mm)', w: 182, h: 257 },
-  { key: 'letter', label: '레터 (216 × 279mm)', w: 216, h: 279 },
-  { key: 'square', label: '정사각 (200 × 200mm)', w: 200, h: 200 },
-  { key: 'a4l', label: 'A4 가로 (297 × 210mm)', w: 297, h: 210 },
-  { key: 'custom', label: '직접 입력', w: null, h: null },
+  { key: 'a5', label: '세로형 A5 — 책 기본 (추천)', w: 148, h: 210 },
+  { key: 'square', label: '정사각형 1:1', w: 200, h: 200 },
+  { key: 'wide', label: '가로형 16:9', w: 160, h: 90 },
 ];
 
-export function presetFor(size) {
-  return PRESETS.find((p) => p.w === size.w && p.h === size.h)?.key || 'custom';
+// 규격 선택 상자 채우기. 목록에 없는 예전 규격이면 '현재 규격'으로 함께 보여줌
+export function fillPresetSelect(select, size) {
+  const match = size && PRESETS.find((p) => p.w === size.w && p.h === size.h);
+  const opts = PRESETS.map((p) => `<option value="${p.key}">${p.label}</option>`);
+  if (size && !match) opts.push(`<option value="legacy">현재 규격 유지 (${size.w} × ${size.h})</option>`);
+  select.innerHTML = opts.join('');
+  select.value = match ? match.key : size ? 'legacy' : 'a5';
+}
+
+export function sizeFromSelect(select, current) {
+  const p = PRESETS.find((x) => x.key === select.value);
+  return p ? { w: p.w, h: p.h } : current;
 }
 
 export async function api(url, options = {}) {
@@ -27,7 +34,32 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export const imgUrl = (name) => `/uploads/${encodeURIComponent(name)}`;
+// 이미지 주소: 인터넷 저장소는 전체 주소(https://…), 내 컴퓨터는 파일 이름
+export const imgUrl = (ref) => (/^https?:\/\//.test(ref) ? ref : `/uploads/${encodeURIComponent(ref)}`);
+
+// 올리기 전에 큰 이미지를 줄이기 (인터넷 버전은 한 번에 약 4.5MB까지만 받을 수 있음)
+const MAX_BYTES = 3.8 * 1024 * 1024;
+const MAX_EDGE = 3000;
+export async function prepareImage(file) {
+  if (file.size <= MAX_BYTES || file.type === 'image/gif') return file;
+  let bitmap;
+  try { bitmap = await createImageBitmap(file); } catch { return file; }
+  const ratio = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * ratio);
+  canvas.height = Math.round(bitmap.height * ratio);
+  const g = canvas.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, canvas.width, canvas.height);
+  g.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  for (const q of [0.92, 0.85, 0.75, 0.6]) {
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', q));
+    if (blob && (blob.size <= MAX_BYTES || q === 0.6)) {
+      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+    }
+  }
+  return file;
+}
 
 export function esc(s = '') {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

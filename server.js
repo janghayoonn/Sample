@@ -1,34 +1,52 @@
 // 프로젝트 북 아카이브 — 서버
-// 책 정보는 data/db.json 에, 이미지는 data/uploads/ 폴더에 저장됩니다.
+// 내 컴퓨터에서는 data/ 폴더에, Vercel(인터넷)에서는 Vercel 저장소에 저장합니다. (storage.js 참고)
 
 import express from 'express';
 import multer from 'multer';
 import { randomUUID, randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypto';
-import fs from 'node:fs/promises';
-import fssync from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createStore, isCloud } from './storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
-// 인터넷에 올릴 때는 DATA_DIR 로 저장 위치(영구 저장 공간)를 지정할 수 있습니다.
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, 'data');
-const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-const AUTH_FILE = path.join(DATA_DIR, 'auth.json');
 
-fssync.mkdirSync(UPLOAD_DIR, { recursive: true });
+const store = await createStore(DATA_DIR);
+
+// ---------- 책 정보와 비밀번호 정보 불러오기 ----------
+// 내 컴퓨터: 처음 한 번만 읽고 메모리에 둠
+// Vercel: 서버가 여러 개로 나뉘어 돌기 때문에 요청마다 최신 상태를 다시 읽음
+let db = { books: [] };
+let auth = {};
+let loaded = false;
+
+async function load() {
+  if (loaded && !isCloud) return;
+  db = (await store.getJSON('db')) || { books: [] };
+  auth = (await store.getJSON('auth')) || {};
+  if (!auth.secret) {
+    auth.secret = randomBytes(32).toString('hex');
+    await store.setJSON('auth', auth);
+  }
+  loaded = true;
+}
+
+let writing = Promise.resolve();
+function save() {
+  writing = writing.then(() => store.setJSON('db', db));
+  return writing;
+}
+
+const shortId = () => randomUUID().replace(/-/g, '').slice(0, 10);
+const findBook = (id) => db.books.find((b) => b.id === id);
+const removeFile = (ref) => store.removeImage(ref);
 
 // ---------- 편집 비밀번호 ----------
 // 비밀번호는 원문이 아니라 '복원할 수 없는 형태(해시)'로만 저장합니다.
-// ADMIN_PASSWORD 환경변수가 있으면 그것이 우선합니다 (인터넷 배포용).
-let auth = fssync.existsSync(AUTH_FILE) ? JSON.parse(fssync.readFileSync(AUTH_FILE, 'utf8')) : {};
-if (!auth.secret) {
-  auth.secret = randomBytes(32).toString('hex');
-  fssync.writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2));
-}
-const SESSION_SECRET = process.env.SESSION_SECRET || auth.secret;
+// ADMIN_PASSWORD 설정값이 있으면 그것이 우선합니다.
 const ENV_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const sessionSecret = () => process.env.SESSION_SECRET || auth.secret;
 
 function hashPassword(pw, salt = randomBytes(16).toString('hex')) {
   return { salt, hash: scryptSync(pw, salt, 64).toString('hex') };
@@ -46,7 +64,7 @@ const passwordIsSet = () => Boolean(ENV_PASSWORD || auth.hash);
 
 const COOKIE = 'ba_session';
 const SESSION_DAYS = 30;
-const sign = (v) => createHmac('sha256', SESSION_SECRET).update(v).digest('hex');
+const sign = (v) => createHmac('sha256', sessionSecret()).update(v).digest('hex');
 function makeSession() {
   const exp = String(Date.now() + SESSION_DAYS * 864e5);
   return `${exp}.${sign(exp)}`;
@@ -67,8 +85,7 @@ function setSessionCookie(req, res) {
 const failures = new Map();
 function tooManyFailures(ip) {
   const f = failures.get(ip);
-  if (!f || f.until < Date.now()) return false;
-  return f.count >= 10;
+  return Boolean(f && f.until > Date.now() && f.count >= 10);
 }
 function recordFailure(ip) {
   const f = failures.get(ip);
@@ -76,61 +93,52 @@ function recordFailure(ip) {
   else f.count++;
 }
 
-// ---------- 간단한 JSON 저장소 ----------
-let db = { books: [] };
-if (fssync.existsSync(DB_FILE)) {
-  db = JSON.parse(fssync.readFileSync(DB_FILE, 'utf8'));
-}
-let writing = Promise.resolve();
-function save() {
-  writing = writing.then(async () => {
-    const tmp = DB_FILE + '.tmp';
-    await fs.writeFile(tmp, JSON.stringify(db, null, 2));
-    await fs.rename(tmp, DB_FILE);
-  });
-  return writing;
-}
-
-const shortId = () => randomUUID().replace(/-/g, '').slice(0, 10);
-const findBook = (id) => db.books.find((b) => b.id === id);
-
-async function removeFile(name) {
-  if (!name) return;
-  await fs.rm(path.join(UPLOAD_DIR, path.basename(name)), { force: true });
-}
-
 // ---------- 이미지 업로드 설정 ----------
+// Vercel은 한 번에 받을 수 있는 크기가 약 4.5MB라서, 화면 쪽에서 미리 줄여서 한 장씩 보냅니다.
 const ALLOWED = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif']);
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: UPLOAD_DIR,
-    filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
-      cb(null, `${Date.now()}-${shortId()}${ext}`);
-    },
-  }),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Math.floor((isCloud ? 4.4 : 50) * 1024 * 1024) },
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     cb(null, ALLOWED.has(ext) && file.mimetype.startsWith('image/'));
   },
 });
+const extOf = (file) => path.extname(file.originalname).toLowerCase() || '.jpg';
+const saveUpload = (file) => store.saveImage(file.buffer, extOf(file), file.mimetype);
 
 function cleanSize(input) {
   const w = Number(input?.w);
   const h = Number(input?.h);
   if (w >= 50 && w <= 1000 && h >= 50 && h <= 1000) return { w, h };
-  return { w: 210, h: 297 };
+  return { w: 148, h: 210 };
 }
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const notFound = (res) => res.status(404).json({ error: '책을 찾을 수 없습니다.' });
 
 // ---------- 앱 ----------
 const app = express();
 app.set('trust proxy', 1); // 인터넷 호스팅(https) 환경에서 보안 쿠키가 제대로 동작하도록
 app.use(express.json());
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
-app.use(express.static(path.join(__dirname, 'public')));
+if (!isCloud) {
+  // Vercel에서는 public 폴더를 Vercel이 직접 보내 줍니다.
+  app.use('/uploads', express.static(store?.uploadDir || DATA_DIR, { maxAge: '7d' }));
+  app.use(express.static(path.join(__dirname, 'public')));
+}
+
+// 저장소가 아직 연결되지 않았을 때 안내
+app.use((req, res, next) => {
+  if (store) return next();
+  res.status(503).type('html').send(`<!doctype html><meta charset="utf-8"><body style="font:18px/1.6 sans-serif;padding:40px;max-width:640px">
+    <h1>저장소 연결이 필요해요</h1>
+    <p>Vercel 프로젝트의 <b>Storage</b> 메뉴에서 <b>Blob</b>과 <b>Upstash Redis</b>를 만들어 이 프로젝트에 연결한 뒤, 다시 배포(Redeploy)해 주세요.</p></body>`);
+});
+
+// 매 요청 전에 최신 데이터 불러오기
+app.use(async (_req, _res, next) => {
+  try { await load(); next(); } catch (e) { next(e); }
+});
 
 // --- 로그인 ---
 app.get('/api/auth/status', (req, res) => {
@@ -142,7 +150,7 @@ app.post('/api/auth/setup', async (req, res) => {
   const pw = String(req.body.password || '');
   if (pw.length < 6) return res.status(400).json({ error: '비밀번호는 6자 이상으로 정해 주세요.' });
   Object.assign(auth, hashPassword(pw));
-  await fs.writeFile(AUTH_FILE, JSON.stringify(auth, null, 2));
+  await store.setJSON('auth', auth);
   setSessionCookie(req, res);
   res.json({ ok: true });
 });
@@ -177,6 +185,7 @@ const requireLogin = (req, res, next) => {
   if (isLoggedIn(req)) return next();
   res.redirect(`/login?next=${encodeURIComponent(req.originalUrl)}`);
 };
+app.get('/', page('public', 'index.html'));
 app.get('/b/:id', page('public', 'book.html'));
 app.get('/login', page('private', 'login.html'));
 app.get('/edit', requireLogin, page('private', 'edit.html'));
@@ -190,23 +199,20 @@ app.get('/api/books', (_req, res) => {
 
 app.get('/api/books/:id', (req, res) => {
   const book = findBook(req.params.id);
-  if (!book) return res.status(404).json({ error: '책을 찾을 수 없습니다.' });
+  if (!book) return notFound(res);
   res.json(book);
 });
 
 // --- 새 책 만들기 ---
 app.post('/api/books', upload.single('cover'), async (req, res) => {
   const title = (req.body.title || '').trim();
-  if (!title) {
-    if (req.file) await removeFile(req.file.filename);
-    return res.status(400).json({ error: '프로젝트명을 입력해 주세요.' });
-  }
+  if (!title) return res.status(400).json({ error: '프로젝트명을 입력해 주세요.' });
   const now = new Date().toISOString();
   const book = {
     id: shortId(),
     title,
     description: (req.body.description || '').trim(),
-    cover: req.file ? req.file.filename : null,
+    cover: req.file ? await saveUpload(req.file) : null,
     pageSize: cleanSize({ w: req.body.pageW, h: req.body.pageH }),
     pages: [],
     createdAt: now,
@@ -220,7 +226,7 @@ app.post('/api/books', upload.single('cover'), async (req, res) => {
 // --- 책 정보 수정 ---
 app.put('/api/books/:id', async (req, res) => {
   const book = findBook(req.params.id);
-  if (!book) return res.status(404).json({ error: '책을 찾을 수 없습니다.' });
+  if (!book) return notFound(res);
   const { title, description, pageSize } = req.body;
   if (typeof title === 'string') {
     if (!title.trim()) return res.status(400).json({ error: '프로젝트명을 입력해 주세요.' });
@@ -236,22 +242,20 @@ app.put('/api/books/:id', async (req, res) => {
 // --- 표지 바꾸기 ---
 app.post('/api/books/:id/cover', upload.single('cover'), async (req, res) => {
   const book = findBook(req.params.id);
-  if (!book) {
-    if (req.file) await removeFile(req.file.filename);
-    return res.status(404).json({ error: '책을 찾을 수 없습니다.' });
-  }
+  if (!book) return notFound(res);
   if (!req.file) return res.status(400).json({ error: '이미지 파일을 선택해 주세요.' });
-  await removeFile(book.cover);
-  book.cover = req.file.filename;
+  const old = book.cover;
+  book.cover = await saveUpload(req.file);
   book.updatedAt = new Date().toISOString();
   await save();
+  await removeFile(old);
   res.json(book);
 });
 
 // --- 책 삭제 ---
 app.delete('/api/books/:id', async (req, res) => {
   const book = findBook(req.params.id);
-  if (!book) return res.status(404).json({ error: '책을 찾을 수 없습니다.' });
+  if (!book) return notFound(res);
   db.books = db.books.filter((b) => b !== book);
   await save();
   await removeFile(book.cover);
@@ -259,16 +263,13 @@ app.delete('/api/books/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// --- 내지 추가 (여러 장 한 번에) ---
+// --- 내지 추가 ---
 app.post('/api/books/:id/pages', upload.array('images', 200), async (req, res) => {
   const book = findBook(req.params.id);
-  if (!book) {
-    for (const f of req.files || []) await removeFile(f.filename);
-    return res.status(404).json({ error: '책을 찾을 수 없습니다.' });
-  }
+  if (!book) return notFound(res);
   if (!req.files?.length) return res.status(400).json({ error: '이미지 파일을 선택해 주세요.' });
   for (const f of req.files) {
-    book.pages.push({ id: shortId(), image: f.filename, fit: 'cover', scale: 1, x: 50, y: 50 });
+    book.pages.push({ id: shortId(), image: await saveUpload(f), fit: 'cover', scale: 1, x: 50, y: 50 });
   }
   book.updatedAt = new Date().toISOString();
   await save();
@@ -278,7 +279,7 @@ app.post('/api/books/:id/pages', upload.array('images', 200), async (req, res) =
 // --- 내지 순서 바꾸기 ---
 app.put('/api/books/:id/pages/order', async (req, res) => {
   const book = findBook(req.params.id);
-  if (!book) return res.status(404).json({ error: '책을 찾을 수 없습니다.' });
+  if (!book) return notFound(res);
   const order = req.body.order;
   if (!Array.isArray(order) || order.length !== book.pages.length) {
     return res.status(400).json({ error: '순서 정보가 올바르지 않습니다.' });
@@ -321,18 +322,23 @@ app.delete('/api/books/:id/pages/:pageId', async (req, res) => {
   res.json(book);
 });
 
-// 업로드 에러 처리
+// 에러 처리
 app.use((err, _req, res, _next) => {
   console.error(err);
-  const msg = err.code === 'LIMIT_FILE_SIZE' ? '파일이 너무 큽니다 (최대 50MB).' : '문제가 생겼습니다.';
-  res.status(400).json({ error: msg });
+  const msg = err.code === 'LIMIT_FILE_SIZE' ? '파일이 너무 큽니다.' : '문제가 생겼습니다. 잠시 뒤 다시 시도해 주세요.';
+  res.status(err.code === 'LIMIT_FILE_SIZE' ? 400 : 500).json({ error: msg });
 });
 
-app.listen(PORT, () => {
-  console.log('');
-  console.log('  프로젝트 북 아카이브가 켜졌습니다.');
-  console.log(`  열람:  http://localhost:${PORT}`);
-  console.log(`  편집:  http://localhost:${PORT}/edit`);
-  console.log('  (끄려면 이 창에서 Control + C)');
-  console.log('');
-});
+export default app;
+
+// 내 컴퓨터에서 실행할 때만 직접 켭니다 (Vercel은 알아서 실행)
+if (!isCloud) {
+  app.listen(PORT, () => {
+    console.log('');
+    console.log('  프로젝트 북 아카이브가 켜졌습니다.');
+    console.log(`  열람:  http://localhost:${PORT}`);
+    console.log(`  편집:  http://localhost:${PORT}/edit`);
+    console.log('  (끄려면 이 창에서 Control + C)');
+    console.log('');
+  });
+}

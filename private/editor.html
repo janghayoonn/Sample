@@ -77,10 +77,6 @@
           <div class="field">
             <label for="preset">내지 규격</label>
             <select id="preset"></select>
-            <div class="size-row" id="customSize" hidden>
-              <input type="number" id="pageW" min="50" max="1000"> ×
-              <input type="number" id="pageH" min="50" max="1000"> mm
-            </div>
           </div>
           <div class="side-actions">
             <button class="btn primary" type="submit">정보 저장</button>
@@ -142,30 +138,20 @@
   </dialog>
 
   <script type="module">
-    import { api, imgUrl, makePage, applyImageStyle, PRESETS, presetFor, toast, pad } from '/common.js';
+    import { api, imgUrl, makePage, applyImageStyle, fillPresetSelect, sizeFromSelect, toast, pad, prepareImage } from '/common.js';
 
     const id = location.pathname.split('/').pop();
     let book;
 
     const $ = (s) => document.getElementById(s);
-    const preset = $('preset'), pageW = $('pageW'), pageH = $('pageH');
-    preset.innerHTML = PRESETS.map((p) => `<option value="${p.key}">${p.label}</option>`).join('');
-
-    function syncSize() {
-      const p = PRESETS.find((x) => x.key === preset.value);
-      $('customSize').hidden = p.key !== 'custom';
-      if (p.w) { pageW.value = p.w; pageH.value = p.h; }
-    }
-    preset.onchange = syncSize;
+    const preset = $('preset');
 
     // ---------- 그리기 ----------
     function renderInfo() {
       document.title = `${book.title} — 편집`;
       $('title').value = book.title;
       $('description').value = book.description;
-      preset.value = presetFor(book.pageSize);
-      pageW.value = book.pageSize.w; pageH.value = book.pageSize.h;
-      $('customSize').hidden = preset.value !== 'custom';
+      fillPresetSelect(preset, book.pageSize);
       renderCover();
       $('viewLink').href = `/b/${book.id}`;
     }
@@ -216,7 +202,7 @@
           json: {
             title: $('title').value,
             description: $('description').value,
-            pageSize: { w: Number(pageW.value), h: Number(pageH.value) },
+            pageSize: sizeFromSelect(preset, book.pageSize),
           },
         });
         renderAll();
@@ -229,7 +215,7 @@
       const f = $('coverInput').files[0];
       if (!f) return;
       const fd = new FormData();
-      fd.append('cover', f);
+      fd.append('cover', await prepareImage(f));
       try {
         book = await api(`/api/books/${id}/cover`, { method: 'POST', body: fd });
         renderCover();
@@ -254,14 +240,22 @@
     async function uploadPages(files) {
       const list = [...files].filter((f) => f.type.startsWith('image/'));
       if (!list.length) return;
-      const fd = new FormData();
-      list.forEach((f) => fd.append('images', f));
-      toast(`${list.length}장 올리는 중…`);
-      try {
-        book = await api(`/api/books/${id}/pages`, { method: 'POST', body: fd });
-        renderPages();
-        toast(`${list.length}장을 추가했어요.`);
-      } catch (err) { toast(err.message); }
+      // 한 장씩 차례로 올려서 큰 이미지도 안정적으로
+      let done = 0;
+      for (const f of list) {
+        toast(`올리는 중… ${done + 1} / ${list.length}`);
+        const fd = new FormData();
+        fd.append('images', await prepareImage(f));
+        try {
+          book = await api(`/api/books/${id}/pages`, { method: 'POST', body: fd });
+          done++;
+          renderPages();
+        } catch (err) {
+          toast(`${f.name}: ${err.message}`);
+          return;
+        }
+      }
+      toast(`${done}장을 추가했어요.`);
     }
     $('addPages').onclick = () => $('pagesInput').click();
     $('dropzone').onclick = () => $('pagesInput').click();

@@ -39,7 +39,7 @@
         </div>
         <div class="field">
           <span class="label">책표지</span>
-          <div class="cover-picker" id="coverPicker" style="aspect-ratio:210/297">
+          <div class="cover-picker" id="coverPicker" style="aspect-ratio:148/210">
             <div class="cover-placeholder">이미지 선택</div>
           </div>
           <input type="file" id="coverInput" accept="image/*" hidden>
@@ -48,10 +48,7 @@
         <div class="field">
           <label for="preset">내지 규격</label>
           <select id="preset"></select>
-          <div class="size-row" id="customSize" hidden>
-            <input type="number" id="pageW" min="50" max="1000" value="210"> ×
-            <input type="number" id="pageH" min="50" max="1000" value="297"> mm
-          </div>
+          <span class="hint">책 안의 모든 내지가 이 비율로 맞춰져요. 나중에 바꿀 수 있어요.</span>
         </div>
       </div>
       <div class="dialog-foot">
@@ -62,27 +59,22 @@
   </dialog>
 
   <script type="module">
-    import { api, esc, coverHTML, PRESETS, toast } from '/common.js';
+    import { api, esc, coverHTML, fillPresetSelect, sizeFromSelect, toast, prepareImage } from '/common.js';
 
     const shelf = document.getElementById('shelf');
     const dialog = document.getElementById('newDialog');
     const form = document.getElementById('newForm');
     const preset = document.getElementById('preset');
-    const pageW = document.getElementById('pageW');
-    const pageH = document.getElementById('pageH');
     const coverInput = document.getElementById('coverInput');
     const coverPicker = document.getElementById('coverPicker');
     let coverFile = null;
 
-    preset.innerHTML = PRESETS.map((p) => `<option value="${p.key}">${p.label}</option>`).join('');
+    fillPresetSelect(preset);
     function syncSize() {
-      const p = PRESETS.find((x) => x.key === preset.value);
-      document.getElementById('customSize').hidden = p.key !== 'custom';
-      if (p.w) { pageW.value = p.w; pageH.value = p.h; }
-      coverPicker.style.aspectRatio = `${pageW.value} / ${pageH.value}`;
+      const { w, h } = sizeFromSelect(preset);
+      coverPicker.style.aspectRatio = `${w} / ${h}`;
     }
     preset.onchange = syncSize;
-    pageW.oninput = pageH.oninput = syncSize;
 
     coverPicker.onclick = () => coverInput.click();
     coverInput.onchange = () => {
@@ -99,9 +91,10 @@
       const fd = new FormData();
       fd.append('title', document.getElementById('title').value);
       fd.append('description', document.getElementById('description').value);
-      fd.append('pageW', pageW.value);
-      fd.append('pageH', pageH.value);
-      if (coverFile) fd.append('cover', coverFile);
+      const size = sizeFromSelect(preset);
+      fd.append('pageW', size.w);
+      fd.append('pageH', size.h);
+      if (coverFile) fd.append('cover', await prepareImage(coverFile));
       try {
         const book = await api('/api/books', { method: 'POST', body: fd });
         location.href = `/edit/${book.id}`;
@@ -115,7 +108,7 @@
       const books = await api('/api/books');
       shelf.innerHTML = `
         <a class="book-card new-card" href="#" id="newBtn">
-          <div class="cover" style="aspect-ratio:210/297"><div><span>+</span>새 책 만들기</div></div>
+          <div class="cover" style="aspect-ratio:148/210"><div><span>+</span>새 책 만들기</div></div>
           <div><h3>&nbsp;</h3><p>&nbsp;</p></div>
         </a>` +
         books.map((b) => `
@@ -126,6 +119,7 @@
       document.getElementById('newBtn').onclick = (e) => {
         e.preventDefault();
         form.reset(); coverFile = null;
+        fillPresetSelect(preset);
         coverPicker.innerHTML = '<div class="cover-placeholder">이미지 선택</div>';
         syncSize();
         dialog.showModal();
