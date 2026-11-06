@@ -16,20 +16,26 @@
   </main>
   <script type="module">
     import { api, esc, coverHTML } from '/common.js';
-    const books = await api('/api/books');
     const shelf = document.getElementById('shelf');
-    if (!books.length) {
-      shelf.outerHTML = '<p class="empty">아직 공개된 책이 없습니다.</p>';
-    } else {
-      shelf.innerHTML = books.map((b) => `
-        <a class="book-card" href="/b/${b.id}">
-          ${coverHTML(b)}
-          <div>
-            <h3>${esc(b.title)}</h3>
-            <p>${new Date(b.createdAt).getFullYear()} · ${b.pageCount}p</p>
-          </div>
-        </a>`).join('');
-    }
+
+    // 새 책 만들기: 누르면 편집 비밀번호 화면 → 로그인 후 '새 책 만들기' 창이 바로 열림
+    const newCard = `
+      <a class="book-card new-card" href="/edit?new=1">
+        <div class="cover" style="aspect-ratio:148/210"><div><span>+</span>신규 책장 만들기</div></div>
+        <div><h3>&nbsp;</h3><p>&nbsp;</p></div>
+      </a>`;
+
+    let books = [];
+    try { books = await api('/api/books'); } catch { /* 불러오지 못해도 버튼은 보여줌 */ }
+
+    shelf.innerHTML = newCard + books.map((b) => `
+      <a class="book-card" href="/b/${b.id}">
+        ${coverHTML(b)}
+        <div>
+          <h3>${esc(b.title)}</h3>
+          <p>${new Date(b.createdAt).getFullYear()} · ${b.pageCount}p</p>
+        </div>
+      </a>`).join('');
   </script>
 </body>
 </html>

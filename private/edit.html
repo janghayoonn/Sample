@@ -125,7 +125,12 @@
         dialog.showModal();
       };
     }
-    load();
+    await load();
+    // 열람 홈의 '신규 책장 만들기'로 들어온 경우 바로 새 책 창 열기
+    if (new URLSearchParams(location.search).has('new')) {
+      history.replaceState(null, '', '/edit');
+      document.getElementById('newBtn').click();
+    }
   </script>
 </body>
 </html>
