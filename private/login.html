@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>편집 로그인 — 프로젝트 북 아카이브</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .login { max-width: 420px; margin: 12vh auto 0; padding: 0 var(--gutter); }
+    .login h1 { font-size: 1.6rem; letter-spacing: -0.02em; margin: 0 0 8px; }
+    .login p { color: var(--muted); margin: 0 0 32px; }
+    .login .btn { width: 100%; margin-top: 8px; }
+    .error { color: #b3261e; font-weight: 500; min-height: 1.6em; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Project Archive</a>
+  </header>
+  <main class="login">
+    <h1 id="heading">편집 로그인</h1>
+    <p id="intro">편집하려면 비밀번호를 입력하세요.</p>
+    <form id="form">
+      <div class="field">
+        <label for="pw">비밀번호</label>
+        <input type="password" id="pw" required autocomplete="current-password" autofocus>
+      </div>
+      <div class="field" id="confirmField" hidden>
+        <label for="pw2">비밀번호 한 번 더</label>
+        <input type="password" id="pw2" autocomplete="new-password">
+      </div>
+      <button class="btn primary" type="submit" id="submit">로그인</button>
+      <div class="error" id="error"></div>
+    </form>
+  </main>
+  <script type="module">
+    import { api } from '/common.js';
+    const $ = (s) => document.getElementById(s);
+    const nextParam = new URLSearchParams(location.search).get('next') || '';
+    const next = nextParam.startsWith('/edit') ? nextParam : '/edit';
+
+    const status = await api('/api/auth/status');
+    if (status.loggedIn) location.replace(next);
+    const setup = status.needsSetup;
+    if (setup) {
+      $('heading').textContent = '편집 비밀번호 정하기';
+      $('intro').textContent = '처음이시네요. 앞으로 편집할 때 쓸 비밀번호를 정해 주세요. (6자 이상)';
+      $('confirmField').hidden = false;
+      $('pw').autocomplete = 'new-password';
+      $('submit').textContent = '정하고 시작하기';
+    }
+
+    $('form').onsubmit = async (e) => {
+      e.preventDefault();
+      $('error').textContent = '';
+      const password = $('pw').value;
+      if (setup && password !== $('pw2').value) {
+        $('error').textContent = '두 비밀번호가 서로 달라요.';
+        return;
+      }
+      try {
+        await api(setup ? '/api/auth/setup' : '/api/auth/login', { method: 'POST', json: { password } });
+        location.replace(next);
+      } catch (err) {
+        $('error').textContent = err.message;
+      }
+    };
+  </script>
+</body>
+</html>

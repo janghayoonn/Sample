@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>책 편집 — 프로젝트 북 아카이브</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .editor { display: grid; grid-template-columns: 340px 1fr; gap: 56px; align-items: start; }
+    .side { position: sticky; top: 24px; }
+    .side .cover-picker { width: 100%; max-width: 220px; }
+    .side-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+    .pages-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .pages-head h2 { margin: 0; font-size: 1.3rem; }
+    .dropzone {
+      border: 1.5px dashed #a9a69d; border-radius: var(--radius); padding: 40px 20px; text-align: center;
+      color: var(--muted); margin-bottom: 32px; transition: .15s; cursor: pointer;
+    }
+    .dropzone strong { color: var(--ink); }
+    .dropzone.over { border-color: var(--ink); background: rgba(0,0,0,.04); color: var(--ink); }
+    .page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 36px 24px; align-items: end; }
+    .page-card .page { cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.06); }
+    .page-card .page:hover { outline: 2px solid var(--ink); }
+    .page-card .bar { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
+    .page-card .num { font-weight: 600; font-variant-numeric: tabular-nums; }
+    .page-card .tools { display: flex; }
+
+    /* 이미지 조절 창 */
+    #adjustDialog { width: min(980px, calc(100vw - 32px)); }
+    .adjust { display: grid; grid-template-columns: 1fr 260px; gap: 32px; align-items: start; }
+    .adjust-stage { background: #e4e2dc; display: grid; place-items: center; padding: 24px; min-height: 420px; }
+    .adjust-stage .page { cursor: grab; box-shadow: 0 2px 12px rgba(0,0,0,.15); touch-action: none; }
+    .adjust-stage .page.dragging { cursor: grabbing; }
+    .seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--ink); border-radius: var(--radius); overflow: hidden; }
+    .seg button { border: 0; background: transparent; min-height: 44px; cursor: pointer; font-weight: 500; }
+    .seg button.on { background: var(--ink); color: var(--bg); }
+    input[type=range] { width: 100%; accent-color: var(--ink); height: 32px; }
+    .adjust .hint { color: var(--muted); font-size: 0.9rem; }
+
+    @media (max-width: 900px) {
+      .editor, .adjust { grid-template-columns: 1fr; }
+      .side { position: static; }
+      .page-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/edit">Project Archive · 편집</a>
+    <nav>
+      <button class="btn ghost" id="copyLink">열람 링크 복사</button>
+      <a class="btn" id="viewLink" href="#">열람 모드로 보기</a>
+      <button class="btn ghost" data-logout>로그아웃</button>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <a class="muted" href="/edit">← 전체 책</a>
+    <div class="editor" style="margin-top:28px">
+      <!-- 왼쪽: 책 정보 -->
+      <aside class="side">
+        <form id="infoForm">
+          <div class="field">
+            <span class="label">책표지</span>
+            <div class="cover-picker" id="coverPicker"></div>
+            <input type="file" id="coverInput" accept="image/*" hidden>
+          </div>
+          <div class="field">
+            <label for="title">프로젝트명</label>
+            <input type="text" id="title" required maxlength="120">
+          </div>
+          <div class="field">
+            <label for="description">설명</label>
+            <textarea id="description" maxlength="2000"></textarea>
+          </div>
+          <div class="field">
+            <label for="preset">내지 규격</label>
+            <select id="preset"></select>
+            <div class="size-row" id="customSize" hidden>
+              <input type="number" id="pageW" min="50" max="1000"> ×
+              <input type="number" id="pageH" min="50" max="1000"> mm
+            </div>
+          </div>
+          <div class="side-actions">
+            <button class="btn primary" type="submit">정보 저장</button>
+            <button class="btn danger" type="button" id="deleteBook">책 삭제</button>
+          </div>
+        </form>
+      </aside>
+
+      <!-- 오른쪽: 내지 -->
+      <section>
+        <div class="pages-head">
+          <h2 id="pagesTitle">내지</h2>
+          <button class="btn primary" id="addPages">+ 내지 이미지 추가</button>
+        </div>
+        <input type="file" id="pagesInput" accept="image/*" multiple hidden>
+        <div class="dropzone" id="dropzone">
+          <strong>이미지를 여기로 끌어다 놓거나 클릭</strong>하세요. 여러 장을 한 번에 올릴 수 있어요.<br>
+          올린 순서대로 페이지가 추가됩니다. 페이지를 누르면 크기·위치를 조절할 수 있어요.
+        </div>
+        <div class="page-grid" id="pageGrid"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- 이미지 조절 창 -->
+  <dialog id="adjustDialog">
+    <div class="dialog-head">
+      <h2 id="adjustTitle">페이지 조절</h2>
+      <button type="button" class="icon-btn" data-close aria-label="닫기">✕</button>
+    </div>
+    <div class="dialog-body">
+      <div class="adjust">
+        <div class="adjust-stage" id="adjustStage"></div>
+        <div>
+          <div class="field">
+            <span class="label">맞춤 방식</span>
+            <div class="seg">
+              <button type="button" data-fit="cover">꽉 채우기</button>
+              <button type="button" data-fit="contain">전체 보이기</button>
+            </div>
+            <span class="hint">꽉 채우기: 페이지를 빈틈없이 채우고 넘치는 부분은 잘려요.<br>전체 보이기: 이미지 전체가 보이고 남는 곳은 흰 여백이 돼요.</span>
+          </div>
+          <div class="field">
+            <label for="scale">확대 <span id="scaleVal">100%</span></label>
+            <input type="range" id="scale" min="100" max="400" step="1" value="100">
+          </div>
+          <div class="field">
+            <span class="label">위치</span>
+            <span class="hint">왼쪽 미리보기에서 이미지를 드래그해 원하는 부분을 맞추세요.</span>
+            <button type="button" class="btn" id="resetAdjust">처음 상태로</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" class="btn ghost" data-close>취소</button>
+      <button type="button" class="btn primary" id="saveAdjust">저장</button>
+    </div>
+  </dialog>
+
+  <script type="module">
+    import { api, imgUrl, makePage, applyImageStyle, PRESETS, presetFor, toast, pad } from '/common.js';
+
+    const id = location.pathname.split('/').pop();
+    let book;
+
+    const $ = (s) => document.getElementById(s);
+    const preset = $('preset'), pageW = $('pageW'), pageH = $('pageH');
+    preset.innerHTML = PRESETS.map((p) => `<option value="${p.key}">${p.label}</option>`).join('');
+
+    function syncSize() {
+      const p = PRESETS.find((x) => x.key === preset.value);
+      $('customSize').hidden = p.key !== 'custom';
+      if (p.w) { pageW.value = p.w; pageH.value = p.h; }
+    }
+    preset.onchange = syncSize;
+
+    // ---------- 그리기 ----------
+    function renderInfo() {
+      document.title = `${book.title} — 편집`;
+      $('title').value = book.title;
+      $('description').value = book.description;
+      preset.value = presetFor(book.pageSize);
+      pageW.value = book.pageSize.w; pageH.value = book.pageSize.h;
+      $('customSize').hidden = preset.value !== 'custom';
+      renderCover();
+      $('viewLink').href = `/b/${book.id}`;
+    }
+
+    function renderCover() {
+      const cp = $('coverPicker');
+      cp.style.aspectRatio = `${book.pageSize.w} / ${book.pageSize.h}`;
+      cp.innerHTML = book.cover
+        ? `<img src="${imgUrl(book.cover)}" alt="">`
+        : `<div class="cover-placeholder">표지 이미지 선택</div>`;
+    }
+
+    function renderPages() {
+      $('pagesTitle').textContent = `내지 ${book.pages.length}장`;
+      const grid = $('pageGrid');
+      grid.innerHTML = '';
+      book.pages.forEach((p, i) => {
+        const card = document.createElement('div');
+        card.className = 'page-card';
+        const pg = makePage(p, book.pageSize);
+        pg.title = '눌러서 크기·위치 조절';
+        pg.onclick = () => openAdjust(p, i);
+        const bar = document.createElement('div');
+        bar.className = 'bar';
+        bar.innerHTML = `
+          <span class="num">${pad(i + 1)}</span>
+          <span class="tools">
+            <button class="icon-btn" data-act="left" title="앞으로" ${i === 0 ? 'disabled style="opacity:.3"' : ''}>←</button>
+            <button class="icon-btn" data-act="right" title="뒤로" ${i === book.pages.length - 1 ? 'disabled style="opacity:.3"' : ''}>→</button>
+            <button class="icon-btn" data-act="del" title="삭제">✕</button>
+          </span>`;
+        bar.querySelector('[data-act=left]').onclick = () => move(i, -1);
+        bar.querySelector('[data-act=right]').onclick = () => move(i, 1);
+        bar.querySelector('[data-act=del]').onclick = () => removePage(p, i);
+        card.append(pg, bar);
+        grid.append(card);
+      });
+    }
+
+    function renderAll() { renderInfo(); renderPages(); }
+
+    // ---------- 책 정보 ----------
+    $('infoForm').onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        book = await api(`/api/books/${id}`, {
+          method: 'PUT',
+          json: {
+            title: $('title').value,
+            description: $('description').value,
+            pageSize: { w: Number(pageW.value), h: Number(pageH.value) },
+          },
+        });
+        renderAll();
+        toast('저장했어요.');
+      } catch (err) { toast(err.message); }
+    };
+
+    $('coverPicker').onclick = () => $('coverInput').click();
+    $('coverInput').onchange = async () => {
+      const f = $('coverInput').files[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append('cover', f);
+      try {
+        book = await api(`/api/books/${id}/cover`, { method: 'POST', body: fd });
+        renderCover();
+        toast('표지를 바꿨어요.');
+      } catch (err) { toast(err.message); }
+      $('coverInput').value = '';
+    };
+
+    $('deleteBook').onclick = async () => {
+      if (!confirm(`'${book.title}' 책을 삭제할까요?\n내지 이미지까지 모두 지워지며 되돌릴 수 없어요.`)) return;
+      await api(`/api/books/${id}`, { method: 'DELETE' });
+      location.href = '/edit';
+    };
+
+    $('copyLink').onclick = async () => {
+      const url = `${location.origin}/b/${book.id}`;
+      try { await navigator.clipboard.writeText(url); toast('열람 링크를 복사했어요.'); }
+      catch { prompt('아래 링크를 복사하세요', url); }
+    };
+
+    // ---------- 내지 추가 ----------
+    async function uploadPages(files) {
+      const list = [...files].filter((f) => f.type.startsWith('image/'));
+      if (!list.length) return;
+      const fd = new FormData();
+      list.forEach((f) => fd.append('images', f));
+      toast(`${list.length}장 올리는 중…`);
+      try {
+        book = await api(`/api/books/${id}/pages`, { method: 'POST', body: fd });
+        renderPages();
+        toast(`${list.length}장을 추가했어요.`);
+      } catch (err) { toast(err.message); }
+    }
+    $('addPages').onclick = () => $('pagesInput').click();
+    $('dropzone').onclick = () => $('pagesInput').click();
+    $('pagesInput').onchange = () => { uploadPages($('pagesInput').files); $('pagesInput').value = ''; };
+    const dz = $('dropzone');
+    dz.ondragover = (e) => { e.preventDefault(); dz.classList.add('over'); };
+    dz.ondragleave = () => dz.classList.remove('over');
+    dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove('over'); uploadPages(e.dataTransfer.files); };
+
+    async function move(i, dir) {
+      const order = book.pages.map((p) => p.id);
+      const j = i + dir;
+      [order[i], order[j]] = [order[j], order[i]];
+      book = await api(`/api/books/${id}/pages/order`, { method: 'PUT', json: { order } });
+      renderPages();
+    }
+
+    async function removePage(p, i) {
+      if (!confirm(`${pad(i + 1)} 페이지를 삭제할까요?`)) return;
+      book = await api(`/api/books/${id}/pages/${p.id}`, { method: 'DELETE' });
+      renderPages();
+    }
+
+    // ---------- 이미지 조절 ----------
+    const dlg = $('adjustDialog');
+    let editing = null, state = null, pageEl = null, imgEl = null;
+    dlg.querySelectorAll('[data-close]').forEach((b) => (b.onclick = () => dlg.close()));
+
+    function fitPreview() {
+      // 미리보기를 화면 높이에 맞춰 크게
+      const maxH = Math.min(window.innerHeight * 0.62, 640);
+      const maxW = $('adjustStage').clientWidth - 48;
+      const r = book.pageSize.w / book.pageSize.h;
+      let h = maxH, w = h * r;
+      if (w > maxW) { w = maxW; h = w / r; }
+      pageEl.style.width = `${w}px`;
+    }
+
+    function paint() {
+      applyImageStyle(imgEl, state);
+      $('scale').value = Math.round(state.scale * 100);
+      $('scaleVal').textContent = `${Math.round(state.scale * 100)}%`;
+      dlg.querySelectorAll('[data-fit]').forEach((b) => b.classList.toggle('on', b.dataset.fit === state.fit));
+    }
+
+    function openAdjust(p, i) {
+      editing = p;
+      state = { fit: p.fit, scale: p.scale, x: p.x, y: p.y };
+      $('adjustTitle').textContent = `${pad(i + 1)} 페이지 조절`;
+      pageEl = makePage(p, book.pageSize, { lazy: false });
+      imgEl = pageEl.querySelector('img');
+      $('adjustStage').replaceChildren(pageEl);
+      dlg.showModal();
+      fitPreview();
+      paint();
+      enableDrag();
+    }
+
+    dlg.querySelectorAll('[data-fit]').forEach((b) => (b.onclick = () => { state.fit = b.dataset.fit; paint(); }));
+    $('scale').oninput = () => { state.scale = $('scale').value / 100; paint(); };
+    $('resetAdjust').onclick = () => { state = { fit: 'cover', scale: 1, x: 50, y: 50 }; paint(); };
+
+    function enableDrag() {
+      let start = null;
+      pageEl.onpointerdown = (e) => {
+        start = { mx: e.clientX, my: e.clientY, x: state.x, y: state.y };
+        pageEl.setPointerCapture(e.pointerId);
+        pageEl.classList.add('dragging');
+      };
+      pageEl.onpointermove = (e) => {
+        if (!start) return;
+        const rect = pageEl.getBoundingClientRect();
+        // 드래그한 방향으로 이미지가 따라오도록
+        const k = 100 / Math.max(state.scale, 1);
+        state.x = Math.min(100, Math.max(0, start.x - ((e.clientX - start.mx) / rect.width) * k));
+        state.y = Math.min(100, Math.max(0, start.y - ((e.clientY - start.my) / rect.height) * k));
+        paint();
+      };
+      pageEl.onpointerup = pageEl.onpointercancel = () => { start = null; pageEl.classList.remove('dragging'); };
+      pageEl.onwheel = (e) => {
+        e.preventDefault();
+        state.scale = Math.min(4, Math.max(1, state.scale - e.deltaY * 0.002));
+        paint();
+      };
+    }
+
+    $('saveAdjust').onclick = async () => {
+      try {
+        book = await api(`/api/books/${id}/pages/${editing.id}`, {
+          method: 'PATCH',
+          json: { ...state, x: Math.round(state.x * 10) / 10, y: Math.round(state.y * 10) / 10 },
+        });
+        dlg.close();
+        renderPages();
+        toast('조절값을 저장했어요.');
+      } catch (err) { toast(err.message); }
+    };
+
+    // ---------- 시작 ----------
+    try {
+      book = await api(`/api/books/${id}`);
+      renderAll();
+    } catch (err) {
+      document.querySelector('main').innerHTML = `<p class="empty">${err.message}<br><br><a class="btn" href="/edit">전체 책으로</a></p>`;
+    }
+  </script>
+</body>
+</html>
