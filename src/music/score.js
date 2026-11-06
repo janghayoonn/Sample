@@ -14,6 +14,8 @@ function emptyScore() {
     bpm: 100,
     // 멜로디: { type: 'note', midi: 60, duration: 'quarter' } 또는 { type: 'rest', duration: 'half' }
     melody: [],
+    // 둘째 성부(낮은음자리표). 모양은 melody와 같고, 지금은 작곡된 곡에서만 채워집니다.
+    part2: [],
     // 나중에 쓸 자리 (지금은 비어 있음)
     chords: [], // 예: [{ measure: 0, beat: 0, symbol: 'C' }]
     lyrics: [], // 예: [{ index: 0, text: '사' }]
@@ -27,6 +29,7 @@ function load() {
     const data = JSON.parse(raw);
     if (!Array.isArray(data.melody)) return null;
     data.melody = data.melody.filter((ev) => DURATIONS[ev.duration]);
+    data.part2 = (Array.isArray(data.part2) ? data.part2 : []).filter((ev) => DURATIONS[ev.duration]);
     return { ...emptyScore(), ...data };
   } catch {
     return null;
@@ -64,7 +67,7 @@ export function createScore() {
       commit({ ...state, melody: state.melody.slice(0, -1) }, 'remove');
     },
     clear() {
-      commit({ ...state, melody: [], chords: [], lyrics: [] }, 'clear');
+      commit({ ...state, melody: [], part2: [], chords: [], lyrics: [] }, 'clear');
     },
     setBpm(bpm) {
       commit({ ...state, bpm }, 'bpm');

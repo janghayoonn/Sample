@@ -17,7 +17,7 @@ const piano = createPiano();
 const player = createPlayer(piano);
 
 let duration = 'quarter';
-let highlight = -1; // 강조할 음표 번호 (연주 중이면 현재 음, 아니면 방금 넣은 음)
+let highlight = { 1: -1, 2: -1 }; // 성부별 강조할 음표 번호 (연주 중이면 현재 음, 아니면 방금 넣은 음)
 let fontReady = false;
 
 /* ---------- 상태 메시지 ---------- */
@@ -31,10 +31,11 @@ function say(text, sticky = false) {
 function summary() {
   const { melody } = score.get();
   if (!melody.length) return '';
-  const ticks = melody.reduce((s, ev) => s + eventTicks(ev), 0);
-  const bars = Math.ceil(ticks / 1920);
+  const part2 = score.get().part2 ?? [];
+  const sum = (list) => list.reduce((s, ev) => s + eventTicks(ev), 0);
+  const bars = Math.ceil(Math.max(sum(melody), sum(part2)) / 1920);
   const notes = melody.filter((ev) => ev.type === 'note').length;
-  return `${bars}마디 · 음표 ${notes}개 · 쉼표 ${melody.length - notes}개`;
+  return `${bars}마디 · 음표 ${notes}개 · 쉼표 ${melody.length - notes}개${part2.length ? ' · 2중주' : ''}`;
 }
 piano.ready.then(() => say('준비 완료. 건반을 눌러 보세요.'));
 
@@ -46,7 +47,7 @@ function draw({ scrollTo = 'none' } = {}) {
   const state = score.get();
   const { positions } = renderScore(scoreEl, state, { highlight, accent });
   $('empty-hint').hidden = state.melody.length > 0;
-  const target = positions.get(highlight);
+  const target = positions.get(`1:${highlight[1]}`) ?? positions.get(`2:${highlight[2]}`);
   if (scrollTo === 'end') paperEl.scrollTop = paperEl.scrollHeight;
   else if (scrollTo === 'highlight' && target) {
     const view = { top: paperEl.scrollTop, bottom: paperEl.scrollTop + paperEl.clientHeight };
@@ -56,7 +57,7 @@ function draw({ scrollTo = 'none' } = {}) {
 
 waitForMusicFont().then(() => {
   fontReady = true;
-  highlight = score.get().melody.length - 1;
+  highlight = { 1: score.get().melody.length - 1, 2: -1 };
   draw({ scrollTo: 'end' });
   renderDurationButtons();
 });
@@ -70,7 +71,7 @@ new ResizeObserver(() => {
 score.subscribe((state, change) => {
   if (change === 'bpm') return;
   if (player.isPlaying()) player.stop();
-  highlight = state.melody.length - 1;
+  highlight = { 1: state.melody.length - 1, 2: -1 };
   draw({ scrollTo: 'end' });
   updateButtons();
   statusEl.textContent = summary();
@@ -184,7 +185,7 @@ function updateButtons() {
   playBtn.classList.toggle('is-playing', playing);
   $('play-label').textContent = playing ? '정지' : '악보 연주';
   playBtn.disabled = !has && !playing;
-  $('midi').disabled = !score.get().melody.some((ev) => ev.type === 'note');
+  $('midi').disabled = ![...score.get().melody, ...(score.get().part2 ?? [])].some((ev) => ev.type === 'note');
   $('undo').disabled = !has;
   $('clear').disabled = !has;
 }
@@ -199,12 +200,12 @@ async function togglePlay() {
   if (!piano.isLoaded()) say('피아노 소리를 불러오는 중이라 조금 뒤에 시작해요…', true);
   await player.play(score.get(), {
     onStep(ev) {
-      highlight = ev.index;
+      highlight = { ...highlight, [ev.part]: ev.index };
       draw({ scrollTo: 'highlight' });
-      if (ev.midi != null) keyboard.flash(ev.midi, 180);
+      if (ev.part === 1 && ev.midi != null) keyboard.flash(ev.midi, 180);
     },
     onEnd() {
-      highlight = score.get().melody.length - 1;
+      highlight = { 1: score.get().melody.length - 1, 2: -1 };
       draw();
       updateButtons();
       statusEl.textContent = summary();

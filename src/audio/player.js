@@ -25,27 +25,36 @@ export function createPlayer(piano) {
     if (playing) stop();
     await piano.unlock();
     await piano.ready;
-    if (!score.melody.length) return;
+    if (!score.melody.length && !(score.part2 ?? []).length) return;
 
     handlers = { onStep, onEnd };
     transport.cancel(0);
     transport.position = 0;
     transport.bpm.value = score.bpm;
 
-    for (const ev of toTimeline(score.melody)) {
-      transport.schedule((time) => {
-        if (ev.midi != null) {
-          // 다음 음과 살짝 떨어지도록 길이의 95%만 누릅니다
-          const seconds = Tone.Ticks(ev.ticks).toSeconds() * 0.95;
-          piano.play(ev.midi, seconds, time);
-        }
-        draw.schedule(() => playing && onStep?.(ev), time);
-      }, `${ev.start}i`);
+    // 윗성부(1)와 아랫성부(2)를 같은 시계에 함께 예약합니다
+    const parts = [
+      { part: 1, melody: score.melody, velocity: 0.8 },
+      { part: 2, melody: score.part2 ?? [], velocity: 0.62 },
+    ];
+    for (const { part, melody, velocity } of parts) {
+      for (const tl of toTimeline(melody)) {
+        const ev = { ...tl, part };
+        transport.schedule((time) => {
+          if (ev.midi != null) {
+            // 다음 음과 살짝 떨어지도록 길이의 95%만 누릅니다
+            const seconds = Tone.Ticks(ev.ticks).toSeconds() * 0.95;
+            piano.play(ev.midi, seconds, time, velocity);
+          }
+          draw.schedule(() => playing && onStep?.(ev), time);
+        }, `${ev.start}i`);
+      }
     }
 
+    const end = Math.max(totalTicks(score.melody), totalTicks(score.part2 ?? []));
     transport.schedule((time) => {
       draw.schedule(() => playing && stop(), time + 0.3);
-    }, `${totalTicks(score.melody)}i`);
+    }, `${end}i`);
 
     playing = true;
     transport.start('+0.08');

@@ -13,19 +13,25 @@ export function scoreToMidi(score) {
   });
   midi.header.update();
 
-  const track = midi.addTrack();
-  track.name = 'Melody';
-  track.instrument.number = 0; // Acoustic Grand Piano
-
   const scale = midi.header.ppq / PPQ;
-  for (const ev of toTimeline(score.melody)) {
-    if (ev.midi == null) continue;
-    track.addNote({
-      midi: ev.midi,
-      ticks: Math.round(ev.start * scale),
-      durationTicks: Math.round(ev.ticks * scale),
-      velocity: 0.8,
-    });
+  const parts = [
+    { name: 'Melody', melody: score.melody, velocity: 0.8 },
+    { name: 'Part 2', melody: score.part2 ?? [], velocity: 0.65 },
+  ];
+  for (const { name, melody, velocity } of parts) {
+    if (!melody.some((ev) => ev.type === 'note')) continue;
+    const track = midi.addTrack();
+    track.name = name;
+    track.instrument.number = 0; // Acoustic Grand Piano
+    for (const ev of toTimeline(melody)) {
+      if (ev.midi == null) continue;
+      track.addNote({
+        midi: ev.midi,
+        ticks: Math.round(ev.start * scale),
+        durationTicks: Math.round(ev.ticks * scale),
+        velocity,
+      });
+    }
   }
   return midi.toArray();
 }
